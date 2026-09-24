@@ -1,0 +1,52 @@
+http:
+  routers:
+    plain:
+      rule: PathPrefix(`/plain`)
+      service: whoami
+    robots:
+      rule: Path(`/robots.txt`)
+      middlewares: [robots]
+      service: whoami
+    captcha:
+      rule: PathPrefix(`/captcha`)
+      middlewares: [captcha]
+      service: whoami
+    modsecurity:
+      rule: PathPrefix(`/modsecurity`)
+      middlewares: [modsecurity]
+      service: whoami
+    fake-waf:
+      rule: PathPrefix(`/`)
+      entryPoints: [fakewaf]
+      middlewares: [deny-all]
+      service: whoami
+
+  middlewares:
+    robots:
+      plugin:
+        robots-txt:
+          customRules: "User-agent: *\nDisallow: /smoke-test/\n"
+          overwrite: true
+    captcha:
+      plugin:
+        captcha-protect:
+          protectRoutes: /captcha
+          ipForwardedHeader: X-Forwarded-For
+          captchaProvider: turnstile
+          # Cloudflare's documented always-pass test keys.
+          siteKey: 1x00000000000000000000AA
+          secretKey: 1x0000000000000000000000000000000AA
+          enableCommonCrawlIPCheck: "false"
+    modsecurity:
+      plugin:
+        modsecurity:
+          modSecurityUrl: http://127.0.0.1:8001
+    deny-all:
+      ipAllowList:
+        sourceRange: ["192.0.2.1/32"]
+
+  services:
+    whoami:
+      loadBalancer:
+        servers:
+          - url: http://whoami:80

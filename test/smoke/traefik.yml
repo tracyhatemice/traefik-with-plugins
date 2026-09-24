@@ -1,0 +1,30 @@
+# Static config for the smoke test. There is deliberately no
+# experimental.plugins section: every plugin that works here is embedded.
+entryPoints:
+  web:
+    address: ":8000"
+    asDefault: true
+    # Lets run.sh present a public client IP via X-Forwarded-For; captcha-protect
+    # exempts private ranges, and Docker requests arrive from a private bridge IP.
+    forwardedHeaders:
+      insecure: true
+  # Stand-in ModSecurity WAF that denies everything (router fake-waf).
+  # Not a default entrypoint, so the plugin routers don't loop back into it.
+  fakewaf:
+    address: ":8001"
+  traefik:
+    address: ":8080"
+
+api:
+  insecure: true
+  disableDashboardAd: true
+
+ping: {}
+
+log:
+  level: INFO
+  noColor: true # run.sh greps for " ERR "
+
+providers:
+  file:
+    filename: /etc/traefik/dynamic.yml

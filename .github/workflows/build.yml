@@ -1,0 +1,266 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["**.md", "docs/**"]
+  pull_request:
+  schedule:
+    - cron: "23 4 * * *" # daily upstream check
+  workflow_dispatch: # check upstream, then rebuild even if nothing changed
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  check:
+    name: Test scripts, check upstream
+    runs-on: ubuntu-latest
+    timeout-minutes: 10 # a hung git ls-remote must not burn hours of Actions minutes
+    outputs:
+      build: ${{ steps.decide.outputs.build }}
+      changes: ${{ steps.update.outputs.changes }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Test scripts
+        run: |
+          scripts/update-versions.test.sh
+          scripts/push-version-bump.test.sh
+          build/integrate-plugins.test.sh
+          shellcheck -x scripts/*.sh test/smoke/run.sh build/*.sh
+
+      # Every run except a PR builds the newest versions the tracks allow, so a
+      # push to main can't publish older pins than the last daily check did.
+      - name: Check upstream versions
+        id: update
+        if: github.event_name != 'pull_request'
+        run: scripts/update-versions.sh versions.conf
+
+      - name: Decide whether to build
+        id: decide
+        env:
+          EVENT: ${{ github.event_name }}
+          CHANGED: ${{ steps.update.outputs.changed }}
+        run: |
+          if [[ $EVENT == schedule && $CHANGED != true ]]; then
+            echo "build=false" >>"$GITHUB_OUTPUT"
+            echo "No upstream updates; nothing to build." >>"$GITHUB_STEP_SUMMARY"
+          else
+            echo "build=true" >>"$GITHUB_OUTPUT"
+          fi
+
+      - name: Hand versions.conf to the build job
+        if: steps.decide.outputs.build == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: versions
+          path: versions.conf
+          overwrite: true # "Re-run all jobs" uploads again into the same run
+          retention-days: 7 # "Re-run failed jobs" after a weekend still finds it
+
+  build:
+    name: Build, test, publish
+    needs: check
+    if: needs.check.outputs.build == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: write # push the versions.conf bump
+      packages: write # push to GHCR
+    env:
+      # Only main publishes; PRs and other branches build and test.
+      PUBLISH: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      # A manual rebuild re-runs the runtime stage uncached to pick up current
+      # Alpine packages; the push step then reuses that tested layer.
+      NO_CACHE_FILTERS: ${{ github.event_name == 'workflow_dispatch' && 'runtime' || '' }}
+    steps:
+      - name: Free disk space
+        # Building both architectures needs more scratch space than a standard
+        # runner has free (Go build and module caches, webui, images); a run
+        # died with "No space left on device". Drop toolchains this job never uses.
+        run: |
+          df -h /
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force >/dev/null
+          df -h /
+
+      - uses: actions/checkout@v7
+
+      - name: Apply upstream updates
+        uses: actions/download-artifact@v8
+        with:
+          name: versions
+          path: .
+
+      - name: Commit version bump locally
+        id: commit
+        env:
+          CHANGES: ${{ needs.check.outputs.changes }}
+        run: |
+          if ! git diff --quiet -- versions.conf; then
+            subject=""
+            while read -r key _ _ new; do
+              [[ $new =~ ^[0-9a-f]{40}$ ]] && new=${new:0:7}
+              subject+="${key%_VERSION}=$new, "
+            done <<<"$CHANGES"
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            printf 'Bump %s\n\n%s\n' "${subject%, }" "$CHANGES" | git commit -q -F - versions.conf
+            echo "bumped=true" >>"$GITHUB_OUTPUT"
+          fi
+          echo "sha=$(git rev-parse --short HEAD)" >>"$GITHUB_OUTPUT"
+          echo "full_sha=$(git rev-parse HEAD)" >>"$GITHUB_OUTPUT"
+
+      - name: Read versions
+        id: versions
+        run: |
+          # shellcheck disable=SC1091
+          . ./versions.conf
+          owner=${GITHUB_REPOSITORY_OWNER,,}
+          plugins=$(sed -n -E 's/^PLUGIN_([A-Z0-9_]+)_REPO=.*/\1/p' versions.conf)
+          {
+            echo "traefik_repo=$TRAEFIK_REPO"
+            echo "traefik_version=$TRAEFIK_VERSION"
+            echo "image=ghcr.io/$owner/traefik"
+            echo "labels<<LABELS_EOF"
+            for name in $plugins; do
+              repo_var=PLUGIN_${name}_REPO
+              version_var=PLUGIN_${name}_VERSION
+              echo "io.github.$owner.traefik.plugin.$(tr 'A-Z_' 'a-z-' <<<"$name")=${!repo_var}@${!version_var}"
+            done
+            echo "LABELS_EOF"
+          } >>"$GITHUB_OUTPUT"
+          {
+            echo "### Components"
+            echo "| Component | Repo | Version |"
+            echo "|---|---|---|"
+            echo "| traefik | $TRAEFIK_REPO | \`$TRAEFIK_VERSION\` |"
+            for name in $plugins; do
+              repo_var=PLUGIN_${name}_REPO
+              version_var=PLUGIN_${name}_VERSION
+              echo "| $(tr 'A-Z_' 'a-z-' <<<"$name") | ${!repo_var} | \`${!version_var}\` |"
+            done
+          } >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Log in to Docker Hub
+        # Optional: with DOCKERHUB_USERNAME and DOCKERHUB_TOKEN secrets set, base
+        # image pulls count against that account instead of the anonymous limit.
+        if: env.DOCKERHUB_USERNAME != ''
+        uses: docker/login-action@v4
+        with:
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - uses: docker/setup-qemu-action@v4
+        with:
+          platforms: arm64
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ steps.versions.outputs.image }}
+          tags: |
+            type=raw,value=latest
+            type=raw,value=${{ steps.versions.outputs.traefik_version }}
+            type=raw,value=sha-${{ steps.commit.outputs.sha }}
+          labels: |
+            org.opencontainers.image.title=traefik
+            org.opencontainers.image.description=Traefik with modsecurity, robots-txt and captcha-protect compiled in
+            org.opencontainers.image.version=${{ steps.versions.outputs.traefik_version }}
+            org.opencontainers.image.revision=${{ steps.commit.outputs.full_sha }}
+            ${{ steps.versions.outputs.labels }}
+
+      - name: Build amd64 for testing
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: build/Dockerfile
+          platforms: linux/amd64
+          build-args: |
+            TRAEFIK_REPO=${{ steps.versions.outputs.traefik_repo }}
+            TRAEFIK_VERSION=${{ steps.versions.outputs.traefik_version }}
+          load: true
+          tags: traefik-smoke:amd64
+          cache-from: type=gha
+          no-cache-filters: ${{ env.NO_CACHE_FILTERS }}
+
+      - name: Smoke test (amd64)
+        run: IMAGE=traefik-smoke:amd64 test/smoke/run.sh
+
+      - name: Build arm64 for testing
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: build/Dockerfile
+          platforms: linux/arm64
+          build-args: |
+            TRAEFIK_REPO=${{ steps.versions.outputs.traefik_repo }}
+            TRAEFIK_VERSION=${{ steps.versions.outputs.traefik_version }}
+          load: true
+          tags: traefik-smoke:arm64
+          cache-from: type=gha
+          no-cache-filters: ${{ env.NO_CACHE_FILTERS }}
+
+      - name: Run the arm64 binary under QEMU
+        run: |
+          out=$(docker run --rm --platform linux/arm64 traefik-smoke:arm64 version)
+          echo "$out"
+          grep -q 'linux/arm64' <<<"$out"
+
+      - name: Log in to GHCR
+        if: env.PUBLISH == 'true'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push both platforms
+        if: env.PUBLISH == 'true'
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: build/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            TRAEFIK_REPO=${{ steps.versions.outputs.traefik_repo }}
+            TRAEFIK_VERSION=${{ steps.versions.outputs.traefik_version }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Push version bump
+        if: env.PUBLISH == 'true' && steps.commit.outputs.bumped == 'true'
+        run: scripts/push-version-bump.sh main
+
+      - name: Summary
+        if: env.PUBLISH == 'true'
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+          PUBLISHED: ${{ steps.versions.outputs.image }}:sha-${{ steps.commit.outputs.sha }}
+        run: |
+          {
+            echo "### Published"
+            echo '```'
+            echo "$TAGS"
+            echo
+            docker buildx imagetools inspect "$PUBLISHED"
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Disk usage
+        if: always()
+        run: |
+          df -h /
+          docker buildx du | tail -n 3

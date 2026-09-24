@@ -1,0 +1,14 @@
+--- pkg/plugins/builder.go
++++ pkg/plugins/builder.go
+@@ -111,6 +111,11 @@
+ 
+ // Build builds a middleware plugin.
+ func (b Builder) Build(pName string, config map[string]any, middlewareName string) (Constructor, error) {
++	// First, check if it's an embedded plugin
++	if IsEmbeddedPlugin(pName) {
++		return BuildEmbeddedPlugin(context.Background(), pName, config, middlewareName)
++	}
++
+ 	if b.middlewareBuilders == nil {
+ 		return nil, fmt.Errorf("no plugin definitions in the static configuration: %s", pName)
+ 	}
