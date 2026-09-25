@@ -9,7 +9,7 @@ ghcr.io/tracyhatemice/traefik    linux/amd64, linux/arm64
 
 | Plugin key | Source | Follows |
 |---|---|---|
-| `modsecurity` | [david-garcia-garcia/traefik-modsecurity](https://github.com/david-garcia-garcia/traefik-modsecurity) | stable releases, same major |
+| `modsecurity` | [tracyhatemice/traefik-modsecurity-plugin](https://github.com/tracyhatemice/traefik-modsecurity-plugin) (fork of madebymode/traefik-modsecurity-plugin) | stable releases, same major |
 | `robots-txt` | [solution-libre/traefik-plugin-robots-txt](https://github.com/solution-libre/traefik-plugin-robots-txt) | stable releases, same major |
 | `captcha-protect` | [tracyhatemice/captcha-protect](https://github.com/tracyhatemice/captcha-protect) (fork of libops/captcha-protect) | stable releases, same major |
 
@@ -66,8 +66,10 @@ reaches your application twice and slow ones exceed the plugin's 2 s
 mount [`docs/crs-apache/httpd-vhosts.drain.conf`](docs/crs-apache/httpd-vhosts.drain.conf)
 over `/usr/local/apache2/conf/extra/httpd-vhosts.conf`, and set
 `REMOTEIP_HEADER=X-Real-IP` and `REMOTEIP_INT_PROXY` to Traefik's network so
-the WAF logs the real client IP. If inspection takes longer than 2 s on your
-hardware (large forms at high paranoia levels), raise `timeoutMillis`.
+the WAF logs the real client IP. If the WAF doesn't answer within
+`timeoutMillis` (default 2 s), or is down, the plugin answers 502, so raise
+`timeoutMillis` if inspection takes longer on your hardware (large forms at
+high paranoia levels).
 
 To use a different plugin key, set `TRAEFIK_EMBEDDED_<KEY>_KEY` on the
 container, with the default key uppercased and `-` replaced by `_`:

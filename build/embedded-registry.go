@@ -14,9 +14,9 @@ import (
 	"github.com/mitchellh/mapstructure"
 	"github.com/rs/zerolog/log"
 
-	modsecurity "github.com/david-garcia-garcia/traefik-modsecurity"
 	robotstxt "github.com/solution-libre/traefik-plugin-robots-txt"
 	captcha "github.com/tracyhatemice/captcha-protect"
+	modsecurity "github.com/tracyhatemice/traefik-modsecurity-plugin"
 )
 
 // embeddedPlugin wraps a plugin compiled into the binary.

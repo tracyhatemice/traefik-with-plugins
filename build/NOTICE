@@ -9,7 +9,7 @@ component's own license file under /licenses/<component>/.
 - build/embedded-registry.go and build/builder.patch are adapted from
   https://github.com/david-garcia-garcia/traefik-with-plugins
   (MIT License, text in section 1).
-- github.com/david-garcia-garcia/traefik-modsecurity is compiled into the
+- github.com/tracyhatemice/traefik-modsecurity-plugin is compiled into the
   image's Traefik binary (Apache License 2.0, text in section 2).
 - github.com/solution-libre/traefik-plugin-robots-txt is compiled into the
   image's Traefik binary (Apache License 2.0, text in section 2).
@@ -47,7 +47,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ================================================================================
-2. Apache License 2.0: traefik-modsecurity, traefik-plugin-robots-txt
+2. Apache License 2.0: traefik-modsecurity-plugin, traefik-plugin-robots-txt
 ================================================================================
 
                                  Apache License
