@@ -71,6 +71,11 @@ the WAF logs the real client IP. If the WAF doesn't answer within
 `timeoutMillis` if inspection takes longer on your hardware (large forms at
 high paranoia levels).
 
+Go's `log/slog` default logger writes to Traefik's logger, so plugins that log
+through it (modsecurity does) follow `log.format` and `log.level`, with their
+fields (e.g. `middlewareName`) next to Traefik's own. captcha-protect builds
+its own slog handler and writes plain text to stdout.
+
 To use a different plugin key, set `TRAEFIK_EMBEDDED_<KEY>_KEY` on the
 container, with the default key uppercased and `-` replaced by `_`:
 

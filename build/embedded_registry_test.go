@@ -1,13 +1,20 @@
 package plugins
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 )
 
 func TestEmbeddedRegistryDefaultKeys(t *testing.T) {
@@ -67,5 +74,31 @@ func TestBuildEmbeddedPluginUnknownKey(t *testing.T) {
 	_, err := BuildEmbeddedPlugin(context.Background(), "nope", nil, "x@file")
 	if err == nil || !strings.Contains(err.Error(), "unknown embedded plugin: nope") {
 		t.Fatalf("err = %v, want unknown embedded plugin error", err)
+	}
+}
+
+func TestEmbeddedPluginsSlogWritesToTraefikLogger(t *testing.T) {
+	// Traefik's logger setup replaces log.Logger after init; slog must follow it.
+	var buf bytes.Buffer
+	prev := log.Logger
+	log.Logger = zerolog.New(&buf)
+	t.Cleanup(func() { log.Logger = prev })
+
+	slog.Default().With("middlewareName", "waf@file").Error("Failed to send request", "error", errors.New("connection refused"), "attempts", 2)
+
+	var entry map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &entry); err != nil {
+		t.Fatalf("slog did not reach Traefik's logger: %q: %v", buf.String(), err)
+	}
+	// Errors render as strings, like Traefik's own error fields.
+	want := map[string]any{"level": "error", "message": "Failed to send request", "middlewareName": "waf@file", "error": "connection refused", "attempts": float64(2)}
+	for k, v := range want {
+		if entry[k] != v {
+			t.Errorf("%s = %v, want %v (entry %v)", k, entry[k], v, entry)
+		}
+	}
+	// Traefik's logger stamps the time itself; a second "time" key would duplicate it in JSON output.
+	if _, ok := entry["time"]; ok {
+		t.Errorf("slog handler added its own time field: %v", entry)
 	}
 }

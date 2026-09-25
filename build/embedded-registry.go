@@ -6,6 +6,7 @@ package plugins
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"sort"
@@ -13,11 +14,31 @@ import (
 
 	"github.com/mitchellh/mapstructure"
 	"github.com/rs/zerolog/log"
+	slogcommon "github.com/samber/slog-common"
+	slogzerolog "github.com/samber/slog-zerolog/v2"
 
 	robotstxt "github.com/solution-libre/traefik-plugin-robots-txt"
 	captcha "github.com/tracyhatemice/captcha-protect"
 	modsecurity "github.com/tracyhatemice/traefik-modsecurity-plugin"
 )
+
+// Embedded plugins that log through log/slog's default logger get Traefik's log
+// format, level filtering and output. This runs before main, so Traefik's own
+// logger setup still decides where the standard log package writes; the handler
+// holds &log.Logger, so it follows Traefik when it replaces that logger.
+func init() {
+	slog.SetDefault(slog.New(slogzerolog.Option{
+		Logger: &log.Logger,
+		// Traefik's logger already stamps the time.
+		NoTimestamp: true,
+		// Unlike slogzerolog.DefaultConverter, leave error values alone so zerolog
+		// writes them as strings, like Traefik's own error fields.
+		Converter: func(_ bool, _ func([]string, slog.Attr) slog.Attr, loggerAttr []slog.Attr, groups []string, record *slog.Record) map[string]any {
+			attrs := slogcommon.AppendRecordAttrsToAttrs(loggerAttr, groups, record)
+			return slogcommon.AttrsToMap(slogcommon.RemoveEmptyAttrs(attrs)...)
+		},
+	}.NewZerologHandler()))
+}
 
 // embeddedPlugin wraps a plugin compiled into the binary.
 // createConfig and callNew mirror the CreateConfig/New pair Yaegi calls.
