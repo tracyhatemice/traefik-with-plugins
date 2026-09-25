@@ -58,6 +58,17 @@ captcha-protect never challenges private addresses (127/8, 10/8, 172.16/12,
 192.168/16, fc00::/8). If Traefik sits behind another proxy or load balancer,
 set `ipForwardedHeader` (and `ipDepth`) so it sees the real client IP.
 
+modsecurity sends each request to the WAF and only needs its verdict, so the
+WAF must be inspect-only: after the CRS checks it answers 200 itself. A stock
+CRS container instead proxies every request to its `BACKEND`, so each request
+reaches your application twice and slow ones exceed the plugin's 2 s
+`timeoutMillis`. For `ghcr.io/coreruleset/modsecurity-crs:apache` (CRS 4.2x+),
+mount [`docs/crs-apache/httpd-vhosts.drain.conf`](docs/crs-apache/httpd-vhosts.drain.conf)
+over `/usr/local/apache2/conf/extra/httpd-vhosts.conf`, and set
+`REMOTEIP_HEADER=X-Real-IP` and `REMOTEIP_INT_PROXY` to Traefik's network so
+the WAF logs the real client IP. If inspection takes longer than 2 s on your
+hardware (large forms at high paranoia levels), raise `timeoutMillis`.
+
 To use a different plugin key, set `TRAEFIK_EMBEDDED_<KEY>_KEY` on the
 container, with the default key uppercased and `-` replaced by `_`:
 
