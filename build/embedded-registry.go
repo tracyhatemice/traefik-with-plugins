@@ -15,8 +15,8 @@ import (
 	"github.com/rs/zerolog/log"
 
 	modsecurity "github.com/david-garcia-garcia/traefik-modsecurity"
-	captcha "github.com/libops/captcha-protect"
 	robotstxt "github.com/solution-libre/traefik-plugin-robots-txt"
+	captcha "github.com/tracyhatemice/captcha-protect"
 )
 
 // embeddedPlugin wraps a plugin compiled into the binary.

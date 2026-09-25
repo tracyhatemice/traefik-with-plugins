@@ -11,7 +11,7 @@ ghcr.io/tracyhatemice/traefik    linux/amd64, linux/arm64
 |---|---|---|
 | `modsecurity` | [david-garcia-garcia/traefik-modsecurity](https://github.com/david-garcia-garcia/traefik-modsecurity) | stable releases, same major |
 | `robots-txt` | [solution-libre/traefik-plugin-robots-txt](https://github.com/solution-libre/traefik-plugin-robots-txt) | stable releases, same major |
-| `captcha-protect` | [tracyhatemice/captcha-protect](https://github.com/tracyhatemice/captcha-protect) (fork of libops/captcha-protect) | every commit on `main` |
+| `captcha-protect` | [tracyhatemice/captcha-protect](https://github.com/tracyhatemice/captcha-protect) (fork of libops/captcha-protect) | stable releases, same major |
 
 Traefik itself follows stable v3 releases. The exact versions in an image are
 in [`versions.conf`](versions.conf) at the commit it was built from, in the
@@ -100,7 +100,9 @@ base image and reinstalls the Alpine packages on top of it
 
 ## Adding a plugin
 
-1. Add `PLUGIN_<NAME>_REPO`, `_VERSION` and `_TRACK` to `versions.conf`.
+1. Add `PLUGIN_<NAME>_REPO`, `_VERSION` and `_TRACK` to `versions.conf`. `_REPO`
+   must be the plugin's Go module path (the `module` line of its `go.mod`); the
+   build fetches it with `go get <module>@<version>`.
 2. Register it in [`build/embedded-registry.go`](build/embedded-registry.go):
    import its Go module and add a `basePluginRegistry` entry. The build fails
    if a plugin in `versions.conf` is not imported there. Add its key to

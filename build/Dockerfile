@@ -49,19 +49,11 @@ RUN check() { \
 RUN patch -p0 --forward < /tmp/builder.patch
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    sh /tmp/integrate-plugins.sh /tmp/versions.conf /plugins pkg/plugins/embedded-registry.go \
+    sh /tmp/integrate-plugins.sh /tmp/versions.conf pkg/plugins/embedded-registry.go /out/licenses \
  && go mod tidy \
  && go test ./pkg/plugins/ -run 'Embedded'
-# Ship the license of Traefik and of every embedded plugin under /licenses.
-RUN copy_license() { \
-      mkdir -p "/out/licenses/$2"; n=0; \
-      for f in "$1"/LICENSE* "$1"/LICENCE* "$1"/COPYING*; do \
-        [ -f "$f" ] && cp "$f" "/out/licenses/$2/" && n=$((n + 1)); \
-      done; \
-      [ "$n" -gt 0 ] || { echo "no license file in $1" >&2; exit 1; }; \
-    } \
- && copy_license . traefik \
- && for dir in /plugins/*; do copy_license "$dir" "$(basename "$dir")"; done
+# integrate-plugins.sh collected the plugins' licenses; add Traefik's own.
+RUN mkdir -p /out/licenses/traefik && cp LICENSE.md /out/licenses/traefik/
 
 ARG TARGETOS
 ARG TARGETARCH
