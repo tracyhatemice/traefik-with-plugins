@@ -102,3 +102,18 @@ func TestEmbeddedPluginsSlogWritesToTraefikLogger(t *testing.T) {
 		t.Errorf("slog handler added its own time field: %v", entry)
 	}
 }
+
+func TestEmbeddedPluginsSlogFollowsTraefikLogLevel(t *testing.T) {
+	// Traefik sets log.Logger's level after init. Records below it must be
+	// dropped at the slog layer, before their attributes are converted.
+	prev := log.Logger
+	log.Logger = zerolog.New(io.Discard).Level(zerolog.InfoLevel)
+	t.Cleanup(func() { log.Logger = prev })
+
+	if slog.Default().Enabled(context.Background(), slog.LevelDebug) {
+		t.Error("debug is enabled while Traefik's logger is at info")
+	}
+	if !slog.Default().Enabled(context.Background(), slog.LevelInfo) {
+		t.Error("info is disabled while Traefik's logger is at info")
+	}
+}

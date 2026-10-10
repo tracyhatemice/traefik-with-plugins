@@ -29,6 +29,9 @@ import (
 func init() {
 	slog.SetDefault(slog.New(slogzerolog.Option{
 		Logger: &log.Logger,
+		// Decide at the slog layer whether a record is below the configured level,
+		// so suppressed records are not converted to zerolog fields first.
+		Level: slogzerolog.ZeroLogLeveler{Logger: &log.Logger},
 		// Traefik's logger already stamps the time.
 		NoTimestamp: true,
 		// Unlike slogzerolog.DefaultConverter, leave error values alone so zerolog
