@@ -110,8 +110,8 @@ func IsEmbeddedPlugin(pluginName string) bool {
 	return ok
 }
 
-// BuildEmbeddedPlugin decodes config the same way Traefik's Yaegi builder does
-// and returns a constructor that calls the plugin's New directly.
+// BuildEmbeddedPlugin decodes config and wraps the handler with wrapExternal
+// the same way Traefik's Yaegi builder does, calling the plugin's New directly.
 func BuildEmbeddedPlugin(_ context.Context, pluginName string, config map[string]any, middlewareName string) (Constructor, error) {
 	plugin, ok := EmbeddedPluginRegistry[pluginName]
 	if !ok {
@@ -138,6 +138,8 @@ func BuildEmbeddedPlugin(_ context.Context, pluginName string, config map[string
 	}
 
 	return func(ctx context.Context, next http.Handler) (http.Handler, error) {
-		return plugin.callNew(ctx, next, cfg, middlewareName)
+		return wrapExternal(next, func(next http.Handler) (http.Handler, error) {
+			return plugin.callNew(ctx, next, cfg, middlewareName)
+		})
 	}, nil
 }

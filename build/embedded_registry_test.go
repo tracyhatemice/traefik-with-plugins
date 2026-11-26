@@ -1,17 +1,20 @@
 package plugins
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -74,6 +77,85 @@ func TestBuildEmbeddedPluginUnknownKey(t *testing.T) {
 	_, err := BuildEmbeddedPlugin(context.Background(), "nope", nil, "x@file")
 	if err == nil || !strings.Contains(err.Error(), "unknown embedded plugin: nope") {
 		t.Fatalf("err = %v, want unknown embedded plugin error", err)
+	}
+}
+
+// embeddedUnwrapWriter mirrors Traefik v3.8's respondingtimeout/tap wrappers:
+// it exposes the underlying writer only through Unwrap, not http.Flusher or http.Hijacker.
+type embeddedUnwrapWriter struct {
+	http.ResponseWriter
+}
+
+func (w *embeddedUnwrapWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
+}
+
+type embeddedRootWriter struct {
+	http.ResponseWriter
+	writeDeadline time.Time
+	fullDuplex    bool
+	hijacked      bool
+}
+
+func (w *embeddedRootWriter) SetWriteDeadline(d time.Time) error {
+	w.writeDeadline = d
+	return nil
+}
+
+func (w *embeddedRootWriter) EnableFullDuplex() error {
+	w.fullDuplex = true
+	return nil
+}
+
+func (w *embeddedRootWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	w.hijacked = true
+	return nil, nil, nil
+}
+
+func TestBuildEmbeddedPluginWrapsExternalResponseWriter(t *testing.T) {
+	// robots-txt wraps rw in a buffering ResponseWriter without Unwrap and
+	// type-asserts http.Hijacker directly. BuildEmbeddedPlugin must wrap it with
+	// wrapExternal like Yaegi/Wasm so ResponseController deadlines, full duplex,
+	// and hijacking work across both unwrap-only upstream writers (respondingTimeouts,
+	// tap) and non-unwrapping plugin writers.
+	config := map[string]any{
+		"customRules": "User-agent: *\nDisallow: /private/\n",
+	}
+	constructor, err := BuildEmbeddedPlugin(context.Background(), "robots-txt", config, "robots@file")
+	if err != nil {
+		t.Fatalf("BuildEmbeddedPlugin: %v", err)
+	}
+
+	deadline := time.Unix(1_700_000_000, 0)
+	backend := http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) {
+		rc := http.NewResponseController(rw)
+		if err := rc.SetWriteDeadline(deadline); err != nil {
+			t.Errorf("SetWriteDeadline: %v", err)
+		}
+		if err := rc.EnableFullDuplex(); err != nil {
+			t.Errorf("EnableFullDuplex: %v", err)
+		}
+		if _, _, err := rc.Hijack(); err != nil {
+			t.Errorf("Hijack: %v", err)
+		}
+	})
+
+	handler, err := constructor(context.Background(), backend)
+	if err != nil {
+		t.Fatalf("constructor: %v", err)
+	}
+
+	root := &embeddedRootWriter{ResponseWriter: httptest.NewRecorder()}
+	handler.ServeHTTP(&embeddedUnwrapWriter{ResponseWriter: root}, httptest.NewRequest(http.MethodGet, "/robots.txt", nil))
+
+	if !root.writeDeadline.Equal(deadline) {
+		t.Errorf("writeDeadline = %v, want %v", root.writeDeadline, deadline)
+	}
+	if !root.fullDuplex {
+		t.Error("EnableFullDuplex did not reach root ResponseWriter")
+	}
+	if !root.hijacked {
+		t.Error("Hijack did not reach root ResponseWriter")
 	}
 }
 

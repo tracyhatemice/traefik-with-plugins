@@ -10,7 +10,7 @@
 #   eval "$(tr -d '\r' < versions.conf)" && docker buildx build -f build/Dockerfile \
 #     --build-arg TRAEFIK_REPO=$TRAEFIK_REPO --build-arg TRAEFIK_VERSION=$TRAEFIK_VERSION .
 
-ARG GO_IMAGE=golang:1.26-alpine
+ARG GO_IMAGE=golang:1.27-alpine
 ARG NODE_IMAGE=node:24-alpine
 ARG RUNTIME_IMAGE=alpine:3.24
 
